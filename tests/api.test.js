@@ -85,3 +85,16 @@ test('workload distinguishes assigned and unassigned open tasks',async t=>{
  assert.equal(report.members[0].overdue_tasks,1);
  assert.equal(report.unassigned_open_tasks,1);
 });
+
+test('task creation requires real canonical due dates and bounded input',async t=>{
+ const {child,dir,base}=await start();
+ t.after(()=>{child.kill();rmSync(dir,{recursive:true,force:true})});
+ for(const invalid of ['2030-02-30','2030-2-3','2030-02-03T00:00','not-a-date']){
+   const [status]=await json(base,'/api/tasks','POST',{title:'QA task',due_date:invalid});
+   assert.equal(status,400);
+ }
+ assert.equal((await json(base,'/api/tasks','POST',
+   {title:'Overly long '+('x'.repeat(300))}))[0],400);
+ assert.equal((await json(base,'/api/tasks','POST',
+   {title:'Leap day',due_date:'2032-02-29',priority:'high'}))[0],200);
+});
