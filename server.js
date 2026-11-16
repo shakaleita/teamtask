@@ -20,6 +20,20 @@ app.get('/api/members',wrap(()=>db.prepare('SELECT * FROM members ORDER BY name'
 app.get('/api/tasks',wrap(req=>{const status=req.query.status;if(status&&!['todo','doing','done'].includes(status))throw Error('Invalid status');return db.prepare(`SELECT tasks.*,members.name assignee FROM tasks LEFT JOIN members ON members.id=tasks.assignee_id ${status?'WHERE tasks.status=?':''} ORDER BY tasks.id DESC`).all(...(status?[status]:[]))}));
 app.post('/api/tasks',wrap(req=>{const {title,description='',priority='medium',assignee_id=null,due_date=null}=req.body;if(!title?.trim()||!['low','medium','high'].includes(priority))throw Error('Invalid task');return db.prepare('INSERT INTO tasks(title,description,priority,assignee_id,due_date) VALUES(?,?,?,?,?)').run(title.trim(),description,priority,assignee_id||null,due_date||null)}));
 app.patch('/api/tasks/:id',wrap(req=>{const {status,priority}=req.body;if(status&&!['todo','doing','done'].includes(status))throw Error('Invalid status');if(priority&&!['low','medium','high'].includes(priority))throw Error('Invalid priority');const r=db.prepare('UPDATE tasks SET status=COALESCE(?,status),priority=COALESCE(?,priority) WHERE id=?').run(status||null,priority||null,req.params.id);if(!r.changes)throw Error('Task not found');return {updated:true}}));app.delete('/api/tasks/:id',wrap(req=>({deleted:db.prepare('DELETE FROM tasks WHERE id=?').run(req.params.id).changes>0})));
+// Safe, read-only CSV export for the local tasks dataset.
+app.get('/api/export/tasks.csv', (_req,res)=>{
+  try {
+    const {serialize}=require('./lib/csv');
+    const stmt=db.prepare("SELECT id,title,priority,status,assignee_id,due_date,created_at FROM tasks ORDER BY id");
+    const rows=stmt.all();
+    const columns=stmt.columns().map(column=>column.name);
+    res.set('Content-Type','text/csv; charset=utf-8');
+    res.set('Content-Disposition','attachment; filename="tasks.csv"');
+    res.set('Cache-Control','no-store');
+    res.send(serialize(rows,columns));
+  }catch(_error){res.status(500).json({error:'CSV export unavailable'})}
+});
+
 // Lightweight service introspection: intentionally no secrets or database contents.
 app.get('/api/health',(_req,res)=>{try{db.prepare('SELECT 1').get();res.json({status:'ok',service:process.env.npm_package_name||'portfolio-service'})}catch(_e){res.status(503).json({status:'unavailable'})}});
 app.get('/api/insights',(_req,res)=>{try{res.json((()=>{ const statuses=db.prepare('SELECT status,COUNT(*) count FROM tasks GROUP BY status ORDER BY status').all();const priorities=db.prepare('SELECT priority,COUNT(*) count FROM tasks GROUP BY priority ORDER BY priority').all();const overdue=db.prepare("SELECT COUNT(*) n FROM tasks WHERE status != 'done' AND due_date < date('now')").get().n;return {tasks_by_status:statuses,tasks_by_priority:priorities,overdue_tasks:overdue}; })())}catch(_e){res.status(500).json({error:'Unable to load insights'})}});
