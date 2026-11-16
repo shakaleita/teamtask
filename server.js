@@ -1,4 +1,20 @@
 const express=require('express'),Database=require('better-sqlite3');const app=express(),db=new Database(process.env.DB_FILE||'app.db');db.pragma('foreign_keys=ON');db.exec(`CREATE TABLE IF NOT EXISTS members(id INTEGER PRIMARY KEY,name TEXT NOT NULL UNIQUE);CREATE TABLE IF NOT EXISTS tasks(id INTEGER PRIMARY KEY,title TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',priority TEXT NOT NULL DEFAULT 'medium',status TEXT NOT NULL DEFAULT 'todo',assignee_id INTEGER REFERENCES members(id),due_date TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP)`);app.disable('x-powered-by');app.use((req,res,next)=>{res.set('X-Content-Type-Options','nosniff');res.set('Referrer-Policy','no-referrer');res.set('X-Frame-Options','DENY');next()});app.use(express.json({limit:'32kb'}));app.use(express.static('public'));
+
+const crypto = require('node:crypto');
+app.use('/api', (req, res, next) => {
+  if (req.path === '/health') return next();
+  const required = process.env.API_TOKEN;
+  if (!required && process.env.APP_ENV !== 'production') return next();
+  if (!required) return res.status(503).json({error:'API authentication must be configured in production'});
+  const actual = req.get('x-api-token') || '';
+  const expectedBytes = Buffer.from(required, 'utf8');
+  const actualBytes = Buffer.from(actual, 'utf8');
+  if (expectedBytes.length !== actualBytes.length || !crypto.timingSafeEqual(expectedBytes, actualBytes)) {
+    return res.status(401).json({error:'Unauthorized'});
+  }
+  next();
+});
+
 const wrap=fn=>(req,res)=>{try{res.json(fn(req))}catch(e){res.status(400).json({error:e.message})}};
 app.get('/api/members',wrap(()=>db.prepare('SELECT * FROM members ORDER BY name').all()));app.post('/api/members',wrap(req=>{if(!req.body.name?.trim())throw Error('Name required');return db.prepare('INSERT INTO members(name) VALUES(?)').run(req.body.name.trim())}));
 app.get('/api/tasks',wrap(req=>{const status=req.query.status;if(status&&!['todo','doing','done'].includes(status))throw Error('Invalid status');return db.prepare(`SELECT tasks.*,members.name assignee FROM tasks LEFT JOIN members ON members.id=tasks.assignee_id ${status?'WHERE tasks.status=?':''} ORDER BY tasks.id DESC`).all(...(status?[status]:[]))}));
