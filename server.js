@@ -35,10 +35,23 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
+function validISODate(value){
+ if(value===null||value===undefined||value==='')return true;
+ if(typeof value!=='string'||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(value))return false;
+ const date=new Date(value+'T00:00:00Z');
+ return Number.isFinite(date.getTime()) && date.toISOString().slice(0,10)===value;
+}
 const wrap=fn=>(req,res)=>{try{res.json(fn(req))}catch(e){res.status(400).json({error:e.message})}};
 app.get('/api/members',wrap(()=>db.prepare('SELECT * FROM members ORDER BY name').all()));app.post('/api/members',wrap(req=>{if(!req.body.name?.trim())throw Error('Name required');return db.prepare('INSERT INTO members(name) VALUES(?)').run(req.body.name.trim())}));
 app.get('/api/tasks',wrap(req=>{const status=req.query.status;if(status&&!['todo','doing','done'].includes(status))throw Error('Invalid status');return db.prepare(`SELECT tasks.*,members.name assignee FROM tasks LEFT JOIN members ON members.id=tasks.assignee_id ${status?'WHERE tasks.status=?':''} ORDER BY tasks.id DESC`).all(...(status?[status]:[]))}));
-app.post('/api/tasks',wrap(req=>{const {title,description='',priority='medium',assignee_id=null,due_date=null}=req.body;if(!title?.trim()||!['low','medium','high'].includes(priority))throw Error('Invalid task');return db.prepare('INSERT INTO tasks(title,description,priority,assignee_id,due_date) VALUES(?,?,?,?,?)').run(title.trim(),description,priority,assignee_id||null,due_date||null)}));
+app.post('/api/tasks',wrap(req=>{const {title,description='',priority='medium',assignee_id=null,due_date=null}=req.body;if(typeof title!=='string'||!title.trim()||title.length>200||
+    typeof description!=='string'||description.length>3000||
+    !['low','medium','high'].includes(priority)||
+    !validISODate(due_date)||
+    (assignee_id!==null && (!Number.isSafeInteger(Number(assignee_id))||Number(assignee_id)<1)))
+    throw Error('Invalid title, description, priority, assignee, or canonical due date');
+ return db.prepare('INSERT INTO tasks(title,description,priority,assignee_id,due_date) VALUES(?,?,?,?,?)')
+  .run(title.trim(),description,priority,assignee_id||null,due_date||null)}));
 app.patch('/api/tasks/:id',wrap(req=>{const {status,priority}=req.body;if(status&&!['todo','doing','done'].includes(status))throw Error('Invalid status');if(priority&&!['low','medium','high'].includes(priority))throw Error('Invalid priority');const r=db.prepare('UPDATE tasks SET status=COALESCE(?,status),priority=COALESCE(?,priority) WHERE id=?').run(status||null,priority||null,req.params.id);if(!r.changes)throw Error('Task not found');return {updated:true}}));app.delete('/api/tasks/:id',wrap(req=>({deleted:db.prepare('DELETE FROM tasks WHERE id=?').run(req.params.id).changes>0})));
 app.get('/api/tasks/:id/history', (req,res)=>{
   const id=Number(req.params.id);
