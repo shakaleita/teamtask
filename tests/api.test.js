@@ -55,3 +55,15 @@ test('CSV export endpoint: documented, read-only, safely cached', async t => {
   const contents=await response.text();
   assert.ok(contents.includes('"id"'));
 });
+
+test('workflow history captures one transition and ignores no-op updates', async t=>{
+  const {child,dir,base}=await start();
+  t.after(()=>{child.kill();rmSync(dir,{recursive:true,force:true})});
+  assert.equal((await json(base,"/api/tasks","POST",{"title":"Audit Task"}))[0],200);
+  assert.equal((await json(base,"/api/tasks/1","PATCH",{"status":"doing"}))[0],200);
+  let [status,events]=await json(base,'/api/tasks/1/history');
+  assert.equal(status,200);
+  assert.equal(events.length,1);
+  assert.equal(events[0].new_value,"doing");
+  assert.equal((await json(base,'/api/tasks/999999/history'))[0],404);
+});
