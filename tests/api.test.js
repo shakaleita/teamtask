@@ -43,3 +43,15 @@ test('real API: create, list, and reject invalid input', async t => {
  const [,secondItems]=await json(base,'/api/tasks');
  assert.equal(secondItems.length,1);
 });
+
+
+test('CSV export endpoint: documented, read-only, safely cached', async t => {
+  const {child,dir,base}=await start();
+  t.after(()=>{child.kill();rmSync(dir,{recursive:true,force:true})});
+  const response=await fetch(base+'/api/export/tasks.csv');
+  assert.equal(response.status,200);
+  assert.match(response.headers.get('content-type'),/text\/csv/i);
+  assert.equal(response.headers.get('cache-control'),'no-store');
+  const contents=await response.text();
+  assert.ok(contents.includes('"id"'));
+});
