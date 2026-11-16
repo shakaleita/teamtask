@@ -66,6 +66,20 @@ app.get('/api/export/tasks.csv', (_req,res)=>{
 
 // Lightweight service introspection: intentionally no secrets or database contents.
 app.get('/api/health',(_req,res)=>{try{db.prepare('SELECT 1').get();res.json({status:'ok',service:process.env.npm_package_name||'portfolio-service'})}catch(_e){res.status(503).json({status:'unavailable'})}});
+app.get('/api/workload',(_req,res)=>{
+ try {
+   const members=db.prepare(`SELECT m.id,m.name,
+     COUNT(t.id) AS assigned_tasks,
+     COALESCE(SUM(CASE WHEN t.status!='done' THEN 1 ELSE 0 END),0) AS open_tasks,
+     COALESCE(SUM(CASE WHEN t.status!='done' AND t.priority='high' THEN 1 ELSE 0 END),0) AS high_priority_tasks,
+     COALESCE(SUM(CASE WHEN t.status!='done' AND t.due_date<date('now') THEN 1 ELSE 0 END),0) AS overdue_tasks
+     FROM members m LEFT JOIN tasks t ON t.assignee_id=m.id
+     GROUP BY m.id ORDER BY m.name`).all();
+   const unassigned=db.prepare("SELECT COUNT(*) AS total FROM tasks WHERE assignee_id IS NULL AND status!='done'").get().total;
+   res.set('Cache-Control','no-store');
+   res.json({members,unassigned_open_tasks:unassigned});
+ }catch(_error){res.status(500).json({error:'Unable to load workload'})}
+});
 app.get('/api/insights',(_req,res)=>{try{res.json((()=>{ const statuses=db.prepare('SELECT status,COUNT(*) count FROM tasks GROUP BY status ORDER BY status').all();const priorities=db.prepare('SELECT priority,COUNT(*) count FROM tasks GROUP BY priority ORDER BY priority').all();const overdue=db.prepare("SELECT COUNT(*) n FROM tasks WHERE status != 'done' AND due_date < date('now')").get().n;return {tasks_by_status:statuses,tasks_by_priority:priorities,overdue_tasks:overdue}; })())}catch(_e){res.status(500).json({error:'Unable to load insights'})}});
 app.use((err,req,res,next)=>{if(err&&err.type==='entity.too.large')return res.status(413).json({error:'Request body too large'});if(err instanceof SyntaxError && 'body' in err)return res.status(400).json({error:'Malformed JSON'});return res.status(500).json({error:'Unexpected server error'})});
 app.listen(Number(process.env.PORT)||3000);
