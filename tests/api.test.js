@@ -71,3 +71,17 @@ test('workflow history captures one transition and ignores no-op updates', async
 
   assert.equal((await json(base,'/api/tasks/999999/history'))[0],404);
 });
+
+test('workload distinguishes assigned and unassigned open tasks',async t=>{
+ const {child,dir,base}=await start();
+ t.after(()=>{child.kill();rmSync(dir,{recursive:true,force:true})});
+ const [,member]=await json(base,'/api/members','POST',{name:'QA Reviewer'});
+ await json(base,'/api/tasks','POST',{title:'Overdue review',assignee_id:member.lastInsertRowid,
+   priority:'high',due_date:'2020-01-01'});
+ await json(base,'/api/tasks','POST',{title:'Unassigned work'});
+ const [status,report]=await json(base,'/api/workload');
+ assert.equal(status,200);
+ assert.equal(report.members[0].high_priority_tasks,1);
+ assert.equal(report.members[0].overdue_tasks,1);
+ assert.equal(report.unassigned_open_tasks,1);
+});
